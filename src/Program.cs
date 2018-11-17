@@ -34,15 +34,11 @@ namespace ArmCop
 
 		private static int ChunkSize { get; set; } = 50;
 
-
 		public static int ChunkCounter { get; set; } = 1;
-
 
 		public static int TotalChunkCount { get; set; }
 
-
 		private static int Timeout { get; set; } = 300000;
-
 
 		private static void Main(string[] args)
 		{
@@ -65,11 +61,9 @@ namespace ArmCop
 			Console.WriteLine(executableInfoMessage);
 			Log.Info(executableInfoMessage);
 
-
 			Parser.Default.ParseArguments<CommandLineOptions>(args)
 				.WithParsed(RunOptionsAndReturnExitCode)
 				.WithNotParsed(HandleParseError);
-
 
 			Console.WriteLine("Copy Complete!");
 		}
@@ -87,32 +81,45 @@ namespace ArmCop
 				{
 					case ErrorType.BadFormatTokenError:
 						break;
+
 					case ErrorType.MissingValueOptionError:
 						break;
+
 					case ErrorType.UnknownOptionError:
 						break;
+
 					case ErrorType.MissingRequiredOptionError:
 						message = $"Missing Required Parameter: {((MissingRequiredOptionError)err).NameInfo.NameText}";
-						
+
 						break;
+
 					case ErrorType.MutuallyExclusiveSetError:
 						break;
+
 					case ErrorType.BadFormatConversionError:
 						break;
+
 					case ErrorType.SequenceOutOfRangeError:
 						break;
+
 					case ErrorType.RepeatedOptionError:
 						break;
+
 					case ErrorType.NoVerbSelectedError:
 						break;
+
 					case ErrorType.BadVerbSelectedError:
 						break;
+
 					case ErrorType.HelpRequestedError:
 						break;
+
 					case ErrorType.HelpVerbRequestedError:
 						break;
+
 					case ErrorType.VersionRequestedError:
 						break;
+
 					default:
 						Console.WriteLine($"Error: {err.Tag}");
 						break;
@@ -120,11 +127,8 @@ namespace ArmCop
 
 				if (message != null && !message.IsNullOrEmpty())
 				{
-					
 				}
 				;
-		
-
 			}		*/
 		}
 
@@ -141,7 +145,6 @@ namespace ArmCop
 
 			if (opts.ChunkSize > 0)
 				ChunkSize = opts.ChunkSize;
-
 
 			var layerNames = new List<string>();
 			var url = opts.MapServerUrl;
@@ -217,14 +220,12 @@ namespace ArmCop
 					File.WriteAllText(oidsFilePath, JsonConvert.SerializeObject(oidJsonObject, Formatting.Indented));
 					Console.WriteLine($"Object IDs written to: {mapServerInfoFilePath}");
 
-
 					var chunks = oids.ChunkBy(ChunkSize);
 					TotalChunkCount = chunks.Count;
 					Console.WriteLine($"Retrieving features, {ChunkSize} chunks at a time...");
 
 					if (!Directory.Exists(layerDirectoryPath))
 						Directory.CreateDirectory(layerDirectoryPath);
-
 
 					foreach (var chunk in chunks)
 					{
@@ -315,7 +316,7 @@ namespace ArmCop
 
 			if (geoJsonFeatureCollection != null)
 			{
-				var cleanedGeoJsonFeatureCollection = CleanedGeoJsonFeatureCollection(geoJsonFeatureCollection);
+				var cleanedGeoJsonFeatureCollection = CleanGeoJsonFeatureCollection(geoJsonFeatureCollection);
 
 				var features = cleanedGeoJsonFeatureCollection["features"];
 
@@ -333,7 +334,6 @@ namespace ArmCop
 
 				var chunkFilename = Path.Combine(layerDirectoryPath,
 					$"{layerNameDirectory}-chunk-{ChunkCounter}.json");
-
 
 				File.WriteAllText(chunkFilename,
 					JsonConvert.SerializeObject(cleanedGeoJsonFeatureCollection, Formatting.Indented));
@@ -379,7 +379,7 @@ namespace ArmCop
 		/// </summary>
 		/// <param name="geoJsonFeatureCollection">The geo json feature collection.</param>
 		/// <returns></returns>
-		private static JObject CleanedGeoJsonFeatureCollection(JObject geoJsonFeatureCollection)
+		private static JObject CleanGeoJsonFeatureCollection(JObject geoJsonFeatureCollection)
 		{
 			if (geoJsonFeatureCollection == null)
 				return null;
@@ -400,22 +400,126 @@ namespace ArmCop
 
 			var newArray = new JArray();
 			foreach (var f in features.Where(x => x["geometry"].IsNullOrEmpty().Equals(false)))
-				if (((JArray) f["geometry"]["coordinates"]).Any())
+			{
+				var id = f.Value<int>("id");
+
+				var featureCoords = (JArray) f["geometry"]["coordinates"];
+
+				var cleaned = CleanGeoJsonGeometryArray(featureCoords);
+
+				f["geometry"]["coordinates"] = cleaned;
+
+				// Some ArcGIS Map Server Output has null measures, which breaks geojson parsers.
+				//Check for it and remove it here:
+				if (featureCoords.Any())
 				{
 					newArray.Add(f);
 				}
 				else
 				{
 					Console.ForegroundColor = ConsoleColor.Red;
-					Console.WriteLine($"Skipping feature: {f["id"]} because the geometry has no coordinates. :(");
+					Console.WriteLine($"Skipping feature: {id} because the geometry has no coordinates. :(");
 					Console.ResetColor();
 
-					_emptyGeometryIds.Add(f.Value<int>("id"));
+					_emptyGeometryIds.Add(id);
 				}
+			}
 
 			geoJsonFeatureCollection["features"] = newArray;
 
 			return geoJsonFeatureCollection;
+		}
+
+		/// <summary>
+		///     Cleans the GeoJson geometry array.
+		/// </summary>
+		/// <param name="array">The array.</param>
+		/// <returns></returns>
+		/// <exception cref="NotSupportedException"></exception>
+		public static JArray CleanGeoJsonGeometryArray(JArray array)
+		{
+			if (JArrayIsNumericArray(array)) return CleanCoordinateArray(array);
+
+			var returnItem = new JArray();
+
+			for (var i = 0; i < array.Count; i++)
+			{
+				var token = array[i];
+
+				if (token is JArray)
+				{
+					var childArray = token as JArray;
+
+					JArray updatedJArray;
+
+					if (JArrayIsNumericArray(childArray))
+						updatedJArray = CleanCoordinateArray(childArray);
+					else
+						updatedJArray = CleanGeoJsonGeometryArray(childArray);
+
+					returnItem.Add(updatedJArray);
+				}
+				else
+				{
+					throw new NotSupportedException();
+				}
+			}
+
+			return returnItem;
+		}
+
+		/// <summary>
+		///     Cleans the coordinate array and returns a new clean JArray
+		/// </summary>
+		/// <param name="childArray">The child array.</param>
+		/// <returns></returns>
+		private static JArray CleanCoordinateArray(JArray childArray)
+		{
+			var newCoordinateArray = new JArray();
+
+			for (var j = 0; j < childArray.Count; j++)
+			{
+				var value = childArray[j].Value<double?>();
+
+				if (value.HasValue)
+					newCoordinateArray.Add(value);
+				else
+					break; // We can't shift values down.  It is XYZM XYZ or XY. Never XYM
+			}
+
+			return newCoordinateArray;
+		}
+
+		public static bool JArrayIsNumericArray(JArray array)
+		{
+			try
+			{
+				var c = 0;
+				var v = 0;
+				foreach (var token in array)
+				{
+					c++;
+
+					if (token is JValue)
+					{
+						var value = (token as JValue).Value<int?>();
+						v++;
+					}
+					else
+					{
+						break;
+					}
+				}
+
+				return c == v;
+			}
+			catch (Exception e)
+			{
+				Console.WriteLine(e);
+				throw;
+			}
+
+			return false;
 		}
 
 		public static FeatureCollection MergeGeoJsonFeatureCollections(List<string> fileNames)
@@ -453,7 +557,6 @@ namespace ArmCop
 			var body =
 				$"where=&text=&objectIds={string.Join(",", oids)}&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=true&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&returnDistinctValues=false&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentsOnly=false&datumTransformation=&parameterValues=&rangeValues=&f=geojson";
 
-
 			var url = $"{layerQueryUrl}";
 			try
 			{
@@ -465,7 +568,6 @@ namespace ArmCop
 
 					if (IsFailedToExecuteQueryResponse(data)) throw FailedToExecuteQueryException.Parse(data);
 				}
-
 
 				return JObject.Parse(data);
 			}
@@ -523,7 +625,6 @@ namespace ArmCop
 				url.GetJsonFromUrl(requestFilter: req => { req.Timeout = Timeout; })
 			);
 		}
-
 
 		private static int GetObjectIdCount(string layerQueryUrl)
 		{
