@@ -255,8 +255,15 @@ namespace ArmCop
 					var mergedGeoJsonFeatureCollectionFileName = Path.Combine(layerDirectoryPath,
 						$"{layerNameDirectory}.geojson");
 
+					var failedObjectIdsFileName = Path.Combine(layerDirectoryPath,
+						$"{layerNameDirectory}-failed-object-ids.geojson");
+
 					File.WriteAllText(mergedGeoJsonFeatureCollectionFileName,
 						JsonConvert.SerializeObject(mergedGeoJsonFeatureCollection, Formatting.Indented));
+
+					File.WriteAllText(failedObjectIdsFileName,
+						JsonConvert.SerializeObject(_failedObjectIds, Formatting.Indented));
+					
 				}
 				else
 				{
