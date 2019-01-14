@@ -65,7 +65,7 @@ namespace ArmCop
 				.WithParsed(RunOptionsAndReturnExitCode)
 				.WithNotParsed(HandleParseError);
 
-			Console.WriteLine("Copy Complete!");
+			
 		}
 
 		private static void HandleParseError(IEnumerable<Error> errs)
@@ -136,7 +136,33 @@ namespace ArmCop
 		{
 			Log.Debug("Enter");
 
-			CopyMapServiceData(opts);
+			try
+			{
+				CopyMapServiceData(opts);
+				Console.WriteLine("Copy Complete!");
+			}
+			catch (Exception e)
+			{
+				Log.Error(e);
+
+				WriteErrorMessage(e.Message);
+				
+				
+
+				// throw;
+			}
+		}
+
+		/// <summary>
+		/// Writes the error message.
+		/// </summary>
+		/// <param name="msg">The MSG.</param>
+		private static void WriteErrorMessage(string msg)
+		{
+			//Console.BackgroundColor = ConsoleColor.Blue;
+			Console.ForegroundColor = ConsoleColor.Red;
+			Console.WriteLine(msg);
+			Console.ResetColor();//reset to the default color
 		}
 
 		public static void CopyMapServiceData(CommandLineOptions opts)
@@ -167,6 +193,14 @@ namespace ArmCop
 
 			Console.WriteLine("Obtaining Map Server Info...");
 			var mapServerInfo = GetMapServerInfo(url);
+
+			var currentArcGISServerVersion = mapServerInfo.Value<float?>("currentVersion");
+
+			if (currentArcGISServerVersion.HasValue && currentArcGISServerVersion.Value < 10.4)
+			{
+				throw new NotSupportedException($"ArcGIS Server version is: {currentArcGISServerVersion.Value} and does not support GeoJson");
+			}
+
 
 			var maxRecordCount = mapServerInfo.Value<int?>("maxRecordCount");
 
